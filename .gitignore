@@ -1,0 +1,10 @@
+*.config
+*.includes
+*.creator
+*.files
+*.o
+*.swp
+*.user
+uftp-server
+uftp-client
+
