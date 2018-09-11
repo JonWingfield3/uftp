@@ -39,17 +39,18 @@ class UftpUtils {
 
   static void SendMessage(const UftpSocketHandle& sock_handle,
                           UftpMessage& uftp_message);
-  static void ReceiveMessage(UftpSocketHandle& sock_handle,
+  static bool ReceiveMessage(UftpSocketHandle& sock_handle,
                              UftpMessage& message);
 
  private:
+  static uint8_t GetCrc(const UftpMessage& uftp_message);
+
   static void UdpSendTo(const UftpSocketHandle& sock_handle, const void* buff,
                         int buff_len);
   static void UdpRecvFrom(UftpSocketHandle& sock_handle, void* buff,
                           int buff_len);
 
   static void ConstructUftpHeader(UftpMessage& uftp_message);
-  static uint8_t GetCrc(const UftpMessage& uftp_message);
   static const std::string GetLogPrefix(const std::string& file,
                                         const std::string& func, int line);
 

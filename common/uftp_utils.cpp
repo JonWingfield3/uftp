@@ -120,7 +120,6 @@ UftpStatusCode UftpUtils::WriteFile(const std::string& filename,
 void UftpUtils::ConstructUftpHeader(UftpMessage& uftp_message) {
   UftpHeader& header = uftp_message.header;
   header.crc = 0;
-  header.status_code = NO_ERR;
   header.message_length = uftp_message.message.size();
   header.command_length = uftp_message.command.size();
   header.argument_length = uftp_message.argument.size();
@@ -171,7 +170,7 @@ void UftpUtils::SendMessage(const UftpSocketHandle& sock_handle,
   DEBUG_LOG("Sent command:", uftp_message.command);
   // Send argument
   UdpSendTo(sock_handle, uftp_message.argument.data(), header.argument_length);
-  DEBUG_LOG("Sent command:", uftp_message.argument);
+  DEBUG_LOG("Sent argument:", uftp_message.argument);
   // Send message
   UdpSendTo(sock_handle, uftp_message.message.data(), header.message_length);
   DEBUG_LOG("Sent message:", uftp_message);
@@ -188,7 +187,7 @@ void UftpUtils::UdpRecvFrom(UftpSocketHandle& sock_handle, void* buff,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-void UftpUtils::ReceiveMessage(UftpSocketHandle& sock_handle,
+bool UftpUtils::ReceiveMessage(UftpSocketHandle& sock_handle,
                                UftpMessage& uftp_message) {
   // Receive header.
   UftpHeader& header = uftp_message.header;
@@ -208,7 +207,13 @@ void UftpUtils::ReceiveMessage(UftpSocketHandle& sock_handle,
   uftp_message.message.resize(header.message_length);
   UdpRecvFrom(sock_handle, uftp_message.message.data(), header.message_length);
   DEBUG_LOG("Received message:", uftp_message);
-  // TODO: Verify Checksum.
+
+  const uint8_t received_crc = header.crc;
+  header.crc = 0;
+  const uint8_t calc_crc = GetCrc(uftp_message);
+  header.crc = received_crc;
+
+  return (calc_crc != received_crc);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

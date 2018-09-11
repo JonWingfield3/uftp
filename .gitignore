@@ -7,4 +7,5 @@
 *.user
 uftp-server
 uftp-client
-
+*.png
+*.txt

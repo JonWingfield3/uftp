@@ -40,7 +40,30 @@ void UftpClient::Close() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-void UftpClient::SendCommand(const std::string& command,
+bool UftpClient::HandleResponse(const UftpMessage& response) {
+  const auto response_code =
+      static_cast<UftpStatusCode>(response.header.status_code);
+
+  if (response.command == "exit") {
+    std::cout << "Closing connection with server...\n";
+    return false;
+
+  } else if (response.command == "ls") {
+    for (const auto byte : response.message) {
+      std::cout << byte;
+    }
+
+  } else if (response.command == "get") {
+    UftpUtils::WriteFile(response.argument, response.message);
+
+  } else if (response_code != UftpStatusCode::NO_ERR) {
+    std::cout << UftpUtils::StatusCodeToString(response_code) << "\n";
+  }
+  return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+bool UftpClient::SendCommand(const std::string& command,
                              const std::string& argument) {
   UftpMessage request, response;
 
@@ -53,7 +76,7 @@ void UftpClient::SendCommand(const std::string& command,
 
   UftpUtils::SendMessage(sock_handle_, request);
   UftpUtils::ReceiveMessage(sock_handle_, response);
-  // TODO: Implement client PrintResponse method.
+  return HandleResponse(response);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -69,6 +92,7 @@ static bool ReadCLIInput(std::string& command, std::string& argument) {
   std::string user_input;
   // Read next line of user input.
   std::getline(std::cin, user_input);
+  DEBUG_LOG("Received user_input:", user_input);
 
   enum class ParserState {
     LOOKING_FOR_COMMAND,
@@ -132,13 +156,12 @@ int main(int argc, char** argv) {
   UftpClient uftp_client(server_address, server_port_number);
   uftp_client.Open();
 
-  while (true) {
-    std::string next_command, next_argument;
-    if (ReadCLIInput(next_command, next_argument)) {
-      uftp_client.SendCommand(next_command, next_argument);
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  std::string next_command, next_argument;
+  do {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    while (!ReadCLIInput(next_command, next_argument)) {
     }
-  }
+  } while (uftp_client.SendCommand(next_command, next_argument));
 
   uftp_client.Close();
   std::exit(0);

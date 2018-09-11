@@ -19,9 +19,11 @@ class UftpClient {
   /// \brief SendCommand
   /// \param command
   ///
-  void SendCommand(const std::string& command, const std::string& argument);
+  bool SendCommand(const std::string& command, const std::string& argument);
 
  private:
+  bool HandleResponse(const UftpMessage& response);
+
   bool open_ = false;
   uint16_t server_port_ = 0;
   UftpSocketHandle sock_handle_;

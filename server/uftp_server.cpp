@@ -77,27 +77,27 @@ void UftpServer::Close() {
 ///////////////////////////////////////////////////////////////////////////////
 bool UftpServer::ReceiveCommand() {
   UftpMessage request, response;
-  UftpUtils::ReceiveMessage(sock_handle_, request);
 
+  UftpUtils::ReceiveMessage(sock_handle_, request);
   HandleRequest(request, response);
+  DEBUG_LOG("Response header:", response.header);
   UftpUtils::SendMessage(sock_handle_, response);
 
-  return (response.header.status_code != UftpStatusCode::CONN_CLOSING);
+  return (response.command != "exit");
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 void UftpServer::HandleRequest(const UftpMessage& request,
                                UftpMessage& response) {
-  UftpStatusCode response_status_code = UftpStatusCode::NO_ERR;
   // These fields are usually the same in request/response pair.
   response.command = request.command;
   response.argument = request.argument;
 
   if (request.command == "exit") {
-    response.header.status_code = UftpStatusCode::CONN_CLOSING;
+    response.header.status_code = UftpStatusCode::NO_ERR;
 
   } else if (request.command == "ls") {
-    response_status_code = HandleLsRequest(response.message);
+    response.header.status_code = HandleLsRequest(response.message);
 
   } else if (request.command == "put") {
     response.header.status_code =
