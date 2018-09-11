@@ -23,10 +23,11 @@ const int UftpUtils::program_start_time_ =
 const std::map<UftpStatusCode, std::string> UftpUtils::UftpStatusCodeStrings{
     {NO_ERR, "No Error"},
     {ERR_FILE_NOT_FOUND, "File Not Found"},
-    {ERR_FILE_BAD_PERMISSIONS, "Bad Permissions"},
+    {ERR_BAD_PERMISSIONS, "Bad Permissions"},
     {ERR_FILE_ALREADY_EXISTS, "File Already Exists"},
     {ERR_BAD_COMMAND, "Bad Command"},
-    {ERR_BAD_CRC, "Bad CRC"}};
+    {ERR_BAD_CRC, "Bad CRC"},
+    {ERR_UNKNOWN, "Unknown Error"}};
 
 ///////////////////////////////////////////////////////////////////////////////
 const std::string& UftpUtils::StatusCodeToString(UftpStatusCode status_code) {
@@ -34,27 +35,27 @@ const std::string& UftpUtils::StatusCodeToString(UftpStatusCode status_code) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-std::ostream& operator<<(std::ostream& ostream,
-                         const struct UftpHeader& uftp_header) {
-  ostream << "status_code: "
+std::ostream& operator<<(std::ostream& ostream, const UftpHeader& uftp_header) {
+  ostream << "| status_code: "
           << UftpUtils::StatusCodeToString(
                  static_cast<UftpStatusCode>(uftp_header.status_code))
-          << ", command_length: " << +uftp_header.command_length
-          << ", message_length: " << uftp_header.message_length
-          << ", crc: " << uftp_header.crc;
+          << " | command_length: " << +uftp_header.command_length
+          << " | argument_length: " << +uftp_header.argument_length
+          << " | message_length: " << uftp_header.message_length
+          << " | crc: " << +uftp_header.crc << " | ";
   return ostream;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 std::ostream& operator<<(std::ostream& ostream,
-                         const struct UftpMessage& uftp_message) {
-  ostream << "Header:\n"
-          << uftp_message.header << "\nCommand: " << uftp_message.command
-          << "\nMessage:\n";
+                         const UftpMessage& uftp_message) {
+  ostream << "Header: " << uftp_message.header
+          << "Command: " << uftp_message.command
+          << " | Argument: " << uftp_message.argument << " | Message: ";
   for (const uint8_t byte : uftp_message.message) {
-    ostream << ":" << std::hex << std::showbase << +byte;
+    ostream << byte;
   }
-  ostream << std::dec << std::noshowbase << "\n";
+  ostream << "|";
   return ostream;
 }
 
@@ -82,18 +83,37 @@ int UftpUtils::CheckErr(int ret, const std::string& error_str) {
   return ret;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-void UftpUtils::ReadFile(const std::string& filename,
-                         std::vector<uint8_t>& buffer) {
+//////////////////////////////////////////////////////////////////////////////
+UftpStatusCode UftpUtils::ReadFile(const std::string& filename,
+                                   std::vector<uint8_t>& buffer) {
   std::ifstream file_stream(filename, std::ios::in | std::ios::binary);
-
+  if (!file_stream.is_open()) {
+    DEBUG_LOG("Couldn't open file:", filename);
+    // TODO: Better error codes in ReadFile
+    return UftpStatusCode::ERR_FILE_NOT_FOUND;
+  }
   file_stream.seekg(0, std::ios::end);
   const uint32_t file_size = file_stream.tellg();
   DEBUG_LOG("File Size:", file_size);
   file_stream.seekg(0, std::ios::beg);
   buffer.resize(file_size);
-
   file_stream.read(reinterpret_cast<char*>(buffer.data()), file_size);
+
+  return UftpStatusCode::NO_ERR;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+UftpStatusCode UftpUtils::WriteFile(const std::string& filename,
+                                    const std::vector<uint8_t>& buffer) {
+  std::ofstream file_stream(filename, std::ios::out | std::ios::binary);
+  if (!file_stream.is_open()) {
+    DEBUG_LOG("Couldn't open file:", filename);
+    return UftpStatusCode::ERR_FILE_NOT_FOUND;
+  }
+  file_stream.write(reinterpret_cast<const char*>(buffer.data()),
+                    buffer.size());
+
+  return UftpStatusCode::NO_ERR;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -103,6 +123,7 @@ void UftpUtils::ConstructUftpHeader(UftpMessage& uftp_message) {
   header.status_code = NO_ERR;
   header.message_length = uftp_message.message.size();
   header.command_length = uftp_message.command.size();
+  header.argument_length = uftp_message.argument.size();
   header.crc = GetCrc(uftp_message);
 }
 
@@ -115,6 +136,9 @@ uint8_t UftpUtils::GetCrc(const UftpMessage& uftp_message) {
   }
   for (int ii = 0; ii < header.command_length; ++ii) {
     crc ^= uftp_message.command[ii];
+  }
+  for (int ii = 0; ii < header.argument_length; ++ii) {
+    crc ^= uftp_message.argument[ii];
   }
   const uint8_t* header_byte_ptr = reinterpret_cast<const uint8_t*>(&header);
   for (int ii = 0; ii < sizeof(UftpHeader); ++ii) {
@@ -145,6 +169,9 @@ void UftpUtils::SendMessage(const UftpSocketHandle& sock_handle,
   // Send command
   UdpSendTo(sock_handle, uftp_message.command.data(), header.command_length);
   DEBUG_LOG("Sent command:", uftp_message.command);
+  // Send argument
+  UdpSendTo(sock_handle, uftp_message.argument.data(), header.argument_length);
+  DEBUG_LOG("Sent command:", uftp_message.argument);
   // Send message
   UdpSendTo(sock_handle, uftp_message.message.data(), header.message_length);
   DEBUG_LOG("Sent message:", uftp_message);
@@ -172,11 +199,16 @@ void UftpUtils::ReceiveMessage(UftpSocketHandle& sock_handle,
   UdpRecvFrom(sock_handle, (void*)uftp_message.command.data(),
               header.command_length);
   DEBUG_LOG("Received command:", uftp_message.command);
+  // Receive argument.
+  uftp_message.argument.resize(header.argument_length);
+  UdpRecvFrom(sock_handle, (void*)uftp_message.argument.data(),
+              header.argument_length);
+  DEBUG_LOG("Received argument:", uftp_message.argument);
   // Receive message.
   uftp_message.message.resize(header.message_length);
   UdpRecvFrom(sock_handle, uftp_message.message.data(), header.message_length);
   DEBUG_LOG("Received message:", uftp_message);
-  // Verify Checksum.
+  // TODO: Verify Checksum.
 }
 
 ///////////////////////////////////////////////////////////////////////////////

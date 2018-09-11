@@ -1,20 +1,14 @@
 #pragma once
 
-#include <arpa/inet.h>
-#include <cstring>
 #include <iostream>
 #include <map>
 #include <string>
 
-#include "uftp_defs.h"
+#include <uftp_defs.h>
 
 #ifdef __DEBUG__
-//#define DEBUG_LOG(...)                                                       \
-//  UftpUtils::DebugLog(UftpUtils::GetLogPrefix(__FILE__, __func__, __LINE__), \
-//                      __VA_ARGS__)
 #define DEBUG_LOG(...) \
   UftpUtils::DebugLog(__FILE__, __func__, __LINE__, __VA_ARGS__)
-
 #else
 #define DEBUG_LOG(...)
 #endif
@@ -37,8 +31,11 @@ class UftpUtils {
   static UftpSocketHandle GetSocketHandle(const std::string& ip_addr,
                                           uint16_t port_number);
 
-  static void ReadFile(const std::string& filename,
-                       std::vector<uint8_t>& buffer);
+  static UftpStatusCode ReadFile(const std::string& filename,
+                                 std::vector<uint8_t>& buffer);
+
+  static UftpStatusCode WriteFile(const std::string& filename,
+                                  const std::vector<uint8_t>& buffer);
 
   static void SendMessage(const UftpSocketHandle& sock_handle,
                           UftpMessage& uftp_message);
@@ -59,16 +56,15 @@ class UftpUtils {
   static void _DebugLog() { std::cerr << "\n"; }
 
   template <typename T, typename... Args>
-  static void _DebugLog(T first, Args... args) {
-    std::cerr << " " << first;
-    _DebugLog(args...);
+  static void _DebugLog(T first_arg, Args... remaining_args) {
+    std::cerr << first_arg;
+    _DebugLog(remaining_args...);
   }
 
   static const int program_start_time_;
   static const std::map<UftpStatusCode, std::string> UftpStatusCodeStrings;
 };
 
-static std::ostream& operator<<(std::ostream& ostream,
-                                const struct UftpHeader& uftp_header);
-static std::ostream& operator<<(std::ostream& ostream,
-                                const struct UftpMessage& uftp_message);
+std::ostream& operator<<(std::ostream& ostream, const UftpHeader& uftp_header);
+std::ostream& operator<<(std::ostream& ostream,
+                         const UftpMessage& uftp_message);

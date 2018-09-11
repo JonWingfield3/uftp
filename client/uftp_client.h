@@ -19,7 +19,7 @@ class UftpClient {
   /// \brief SendCommand
   /// \param command
   ///
-  void HandleCommand(const std::string& command, const std::string& argument);
+  void SendCommand(const std::string& command, const std::string& argument);
 
  private:
   bool open_ = false;

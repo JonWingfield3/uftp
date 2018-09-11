@@ -1,6 +1,7 @@
 #include "uftp_server.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <chrono>
 #include <cstdio>
 #include <sstream>
@@ -12,37 +13,38 @@
 #include <uftp_utils.h>
 
 /////////////////////////////////////////////////////////////////////////////////
-// int UftpUtils::HandleLsRequest(std::vector<uint8_t>& message) {
-//  // Do this the good ole C way since support for
-//  std::experimental::filesystem
-//  // isn't great.
-//  std::ostringstream osstream;
-//  DIR* dir = nullptr;
-//  if ((dir = opendir(".")) != nullptr) {
-//    dirent* dir_entry = nullptr;
-//    while ((dir_entry = readdir(dir)) != nullptr) {
-//      osstream << dir_entry->d_name << "\n";
-//    }
-//  } else {
-//    // Couldn't open dir. Write error mesage
-//    osstream << "Couldn't read directory!\n";
-//  }
-//  const std::string& str = osstream.str();
-//  message.insert(message.end(), str.begin(), str.end());
-//}
-//
-/////////////////////////////////////////////////////////////////////////////////
-// int UftpUtils::HandleDeleteRequest(const std::string& filename,
-//                                   std::vector<uint8_t>& message) {
-//  const int ret = std::remove(filename.c_str());
-//  if (ret != 0) {
-//    std::ostringstream osstream;
-//    osstream << "Unable to remove file " << filename << ", "
-//             << std::strerror(errno);
-//    const std::string& str = osstream.str();
-//    message.insert(message.end(), str.begin(), str.end());
-//  }
-//}
+UftpStatusCode UftpServer::HandleLsRequest(std::vector<uint8_t>& message) {
+  UftpStatusCode return_code = UftpStatusCode::NO_ERR;
+  std::ostringstream osstream;
+
+  DIR* dir = nullptr;
+  if ((dir = opendir(".")) != nullptr) {
+    dirent* dir_entry = nullptr;
+    while ((dir_entry = readdir(dir)) != nullptr) {
+      osstream << dir_entry->d_name << "\n";
+    }
+  } else {
+    // Couldn't open dir. Write error mesage
+    osstream << "Couldn't read directory!\n";
+    return_code = UftpStatusCode::ERR_BAD_PERMISSIONS;
+  }
+  const std::string& str = osstream.str();
+  message.insert(message.end(), str.begin(), str.end());
+}
+
+//////////////////////////////////////////////////////////////////////////////
+UftpStatusCode UftpServer::HandleDeleteRequest(const std::string& filename) {
+  const int ret = std::remove(filename.c_str());
+  if (ret == 0) {
+    return UftpStatusCode::NO_ERR;
+  } else if (ret == ENOENT) {
+    return UftpStatusCode::ERR_FILE_NOT_FOUND;
+  } else if (ret == EACCES) {
+    return UftpStatusCode::ERR_BAD_PERMISSIONS;
+  } else {
+    return UftpStatusCode::ERR_UNKNOWN;
+  }
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 void UftpServer::Open() {
@@ -58,7 +60,7 @@ void UftpServer::Open() {
            sizeof(sock_handle_.addr)),
       "Error binding to port");
 
-  DEBUG_LOG("Binded to port:", server_port_);
+  DEBUG_LOG("Binded to port: ", server_port_);
   open_ = true;
 }
 
@@ -68,25 +70,49 @@ void UftpServer::Close() {
     return;
   }
   UftpUtils::CheckErr(close(sock_handle_.sockfd), "Error closing udp socket");
-  DEBUG_LOG("Closed socket on port:", server_port_);
+  DEBUG_LOG("Closed socket on port: ", server_port_);
   open_ = false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-void UftpServer::HandleRequest() {
-  //  std::vector<uint8_t> buffer(1);
-  //  sockaddr_in clientaddr;
-  //  socklen_t clientlen = sizeof(clientaddr);
-  //  recvfrom(sockfd_, buffer.data(), buffer.size(), 0,
-  //           (struct sockaddr*)&clientaddr, &clientlen);
-  //  DEBUG_LOG("Received:", buffer[0]);
-  //  sendto(sockfd_, buffer.data(), buffer.size(), 0,
-  //         (struct sockaddr*)&clientaddr, clientlen)
+bool UftpServer::ReceiveCommand() {
   UftpMessage request, response;
   UftpUtils::ReceiveMessage(sock_handle_, request);
-  // Handle command based on command, payload
 
+  HandleRequest(request, response);
   UftpUtils::SendMessage(sock_handle_, response);
+
+  return (response.header.status_code != UftpStatusCode::CONN_CLOSING);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+void UftpServer::HandleRequest(const UftpMessage& request,
+                               UftpMessage& response) {
+  UftpStatusCode response_status_code = UftpStatusCode::NO_ERR;
+  // These fields are usually the same in request/response pair.
+  response.command = request.command;
+  response.argument = request.argument;
+
+  if (request.command == "exit") {
+    response.header.status_code = UftpStatusCode::CONN_CLOSING;
+
+  } else if (request.command == "ls") {
+    response_status_code = HandleLsRequest(response.message);
+
+  } else if (request.command == "put") {
+    response.header.status_code =
+        UftpUtils::WriteFile(request.argument, request.message);
+
+  } else if (request.command == "get") {
+    response.header.status_code =
+        UftpUtils::ReadFile(request.argument, response.message);
+
+  } else if (request.command == "delete") {
+    response.header.status_code = HandleDeleteRequest(request.argument);
+
+  } else {
+    response.header.status_code = UftpStatusCode::ERR_BAD_COMMAND;
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -98,14 +124,12 @@ int main(int argc, char** argv) {
   }
 
   const uint16_t port_number = atoi(argv[1]);
-  DEBUG_LOG("Port number:", port_number);
 
   UftpServer uftp_server(port_number);
   uftp_server.Open();
 
-  while (true) {
-    uftp_server.HandleRequest();
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+  while (uftp_server.ReceiveCommand()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
   uftp_server.Close();

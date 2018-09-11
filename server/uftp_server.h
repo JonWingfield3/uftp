@@ -20,12 +20,12 @@ class UftpServer {
   void Open();
   void Close();
 
-  void HandleRequest();
+  bool ReceiveCommand();
 
  private:
-  int HandleLsRequest(std::vector<uint8_t>& message);
-  int HandleDeleteRequest(const std::string& filename,
-                          std::vector<uint8_t>& message);
+  void HandleRequest(const UftpMessage& request, UftpMessage& response);
+  UftpStatusCode HandleLsRequest(std::vector<uint8_t>& message);
+  UftpStatusCode HandleDeleteRequest(const std::string& filename);
 
   bool open_ = false;
   uint16_t server_port_ = 0;

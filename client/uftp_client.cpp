@@ -23,7 +23,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 void UftpClient::Open() {
   sock_handle_ = UftpUtils::GetSocketHandle(server_addr_str_, server_port_);
-  DEBUG_LOG("Opened socket to host:", server_addr_str_, ", port:",
+  DEBUG_LOG("Opened socket to host: ", server_addr_str_, ", port: ",
             server_port_);
   open_ = true;
 }
@@ -34,41 +34,88 @@ void UftpClient::Close() {
     return;
   }
   UftpUtils::CheckErr(close(sock_handle_.sockfd), "Error closing udp socket");
-  DEBUG_LOG("Closed socket to host:", server_addr_str_, ", port:",
+  DEBUG_LOG("Closed socket to host: ", server_addr_str_, ", port: ",
             server_port_);
   open_ = false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-void UftpClient::HandleCommand(const std::string& command,
-                               const std::string& argument) {
-  //  sendto(sockfd_, command.c_str(), command.size(), 0,
-  //         (struct sockaddr*)&server_addr_, sizeof(server_addr_));
-  //  DEBUG_LOG("Sent:", command);
-  //
-  //  std::vector<uint8_t> buffer(1);
-  //  socklen_t len = sizeof(server_addr_);
-  //  recvfrom(sockfd_, buffer.data(), buffer.size(), 0,
-  //           (struct sockaddr*)&server_addr_, &len);
-  //  DEBUG_LOG("Received:", buffer[0]);
-
-  //  UftpMessage send_message, response_message;
-  //  send_message.command = command + argument;
-  //  UftpUtils::SendMessage(sock_handle_, send_message);
-  //  UftpUtils::ReceiveMessage(sock_handle_, response_message);
-  //
-  //  return;
-
+void UftpClient::SendCommand(const std::string& command,
+                             const std::string& argument) {
   UftpMessage request, response;
-  request.command = command;
 
   if (command == "put") {  // need to check argument and try to read in file.
     UftpUtils::ReadFile(argument, request.message);
   }
-  request.command += argument;
+
+  request.command = command;
+  request.argument = argument;
 
   UftpUtils::SendMessage(sock_handle_, request);
   UftpUtils::ReceiveMessage(sock_handle_, response);
+  // TODO: Implement client PrintResponse method.
+}
+
+///////////////////////////////////////////////////////////////////////////////
+static bool ReadCLIInput(std::string& command, std::string& argument) {
+  // Empty out command and argument.
+  command = std::string();
+  argument = std::string();
+
+  // Print command prompt.
+  std::cout << ">> ";
+
+  // Buffer for user input.
+  std::string user_input;
+  // Read next line of user input.
+  std::getline(std::cin, user_input);
+
+  enum class ParserState {
+    LOOKING_FOR_COMMAND,
+    READING_COMMAND,
+    LOOKING_FOR_ARG,
+    READING_ARG,
+    DONE,
+  };
+
+  ParserState parser_state;
+  for (const auto character : user_input) {
+    if (parser_state == ParserState::DONE) break;
+
+    switch (parser_state) {
+      case ParserState::LOOKING_FOR_COMMAND:
+        if (character != ' ') {
+          command.push_back(character);
+          parser_state = ParserState::READING_COMMAND;
+        }
+        break;
+      case ParserState::READING_COMMAND:
+        if (character != ' ') {
+          command.push_back(character);
+        } else {
+          parser_state = ParserState::LOOKING_FOR_ARG;
+        }
+        break;
+      case ParserState::LOOKING_FOR_ARG:
+        if (character != ' ') {
+          argument.push_back(character);
+          parser_state = ParserState::READING_ARG;
+        }
+        break;
+      case ParserState::READING_ARG:
+        if (character != ' ') {
+          argument.push_back(character);
+        } else {
+          parser_state = ParserState::DONE;
+        }
+        break;
+    }
+  }
+
+  DEBUG_LOG("next_command: <", command, ">");
+  DEBUG_LOG("next_argument: <", argument, ">");
+
+  return (command.size() > 0);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -81,21 +128,16 @@ int main(int argc, char** argv) {
 
   const std::string server_address = argv[1];
   const uint16_t server_port_number = atoi(argv[2]);
-  DEBUG_LOG("Server IP address:", server_address, ", Server port number:",
-            server_port_number);
 
   UftpClient uftp_client(server_address, server_port_number);
   uftp_client.Open();
 
   while (true) {
-    std::string next_command;
-    std::string next_argument;  // may be empty string
-    std::cin >> next_command;
-    DEBUG_LOG("Received command:", next_command);
-    //    std::getline(std::cin, next_argument);
-    //    DEBUG_LOG("Received argument:", next_argument);
-    uftp_client.HandleCommand(next_command, next_argument);
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    std::string next_command, next_argument;
+    if (ReadCLIInput(next_command, next_argument)) {
+      uftp_client.SendCommand(next_command, next_argument);
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
   }
 
   uftp_client.Close();
