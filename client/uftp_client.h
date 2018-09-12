@@ -18,6 +18,8 @@ class UftpClient {
   ///
   /// \brief SendCommand
   /// \param command
+  /// \param argument
+  /// \return true if the connection is remaining open, false otherwise.
   ///
   bool SendCommand(const std::string& command, const std::string& argument);
 

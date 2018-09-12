@@ -21,17 +21,32 @@ const int UftpUtils::program_start_time_ =
         .count();
 
 const std::map<UftpStatusCode, std::string> UftpUtils::UftpStatusCodeStrings{
-    {NO_ERR, "No Error"},
-    {ERR_FILE_NOT_FOUND, "File Not Found"},
-    {ERR_BAD_PERMISSIONS, "Bad Permissions"},
-    {ERR_FILE_ALREADY_EXISTS, "File Already Exists"},
-    {ERR_BAD_COMMAND, "Bad Command"},
-    {ERR_BAD_CRC, "Bad CRC"},
-    {ERR_UNKNOWN, "Unknown Error"}};
+    {UftpStatusCode::NO_ERR, "No Error"},
+    {UftpStatusCode::ERR_FILE_NOT_FOUND, "File Not Found"},
+    {UftpStatusCode::ERR_BAD_PERMISSIONS, "Bad Permissions"},
+    {UftpStatusCode::ERR_FILE_ALREADY_EXISTS, "File Already Exists"},
+    {UftpStatusCode::ERR_BAD_COMMAND, "Bad Command"},
+    {UftpStatusCode::ERR_BAD_CRC, "Bad CRC"},
+    {UftpStatusCode::ERR_UNKNOWN, "Unknown Error"}};
+
+const std::map<int, UftpStatusCode> UftpUtils::ErrnoToStatusCodeMap{
+    {ENOENT, UftpStatusCode::ERR_FILE_NOT_FOUND},
+    {EACCES, UftpStatusCode::ERR_BAD_PERMISSIONS},
+    {0, UftpStatusCode::NO_ERR}};
 
 ///////////////////////////////////////////////////////////////////////////////
 const std::string& UftpUtils::StatusCodeToString(UftpStatusCode status_code) {
   return UftpStatusCodeStrings.at(status_code);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+UftpStatusCode UftpUtils::ErrnoToStatusCode(int errno_val) {
+  const auto status_code_ite = ErrnoToStatusCodeMap.find(errno_val);
+  if (status_code_ite == ErrnoToStatusCodeMap.end()) {
+    return UftpStatusCode::ERR_UNKNOWN;
+  } else {
+    return status_code_ite->second;
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -87,11 +102,18 @@ int UftpUtils::CheckErr(int ret, const std::string& error_str) {
 UftpStatusCode UftpUtils::ReadFile(const std::string& filename,
                                    std::vector<uint8_t>& buffer) {
   std::ifstream file_stream(filename, std::ios::in | std::ios::binary);
+
   if (!file_stream.is_open()) {
     DEBUG_LOG("Couldn't open file:", filename);
-    // TODO: Better error codes in ReadFile
-    return UftpStatusCode::ERR_FILE_NOT_FOUND;
+    if (errno == ENOENT) {
+      return UftpStatusCode::ERR_FILE_NOT_FOUND;
+    } else if (errno == EACCES) {
+      return UftpStatusCode::ERR_BAD_PERMISSIONS;
+    } else {
+      return UftpStatusCode::ERR_UNKNOWN;
+    }
   }
+
   file_stream.seekg(0, std::ios::end);
   const uint32_t file_size = file_stream.tellg();
   DEBUG_LOG("File Size:", file_size);
@@ -106,10 +128,18 @@ UftpStatusCode UftpUtils::ReadFile(const std::string& filename,
 UftpStatusCode UftpUtils::WriteFile(const std::string& filename,
                                     const std::vector<uint8_t>& buffer) {
   std::ofstream file_stream(filename, std::ios::out | std::ios::binary);
+
   if (!file_stream.is_open()) {
     DEBUG_LOG("Couldn't open file:", filename);
-    return UftpStatusCode::ERR_FILE_NOT_FOUND;
+    if (errno == ENOENT) {
+      return UftpStatusCode::ERR_FILE_NOT_FOUND;
+    } else if (errno == EACCES) {
+      return UftpStatusCode::ERR_BAD_PERMISSIONS;
+    } else {
+      return UftpStatusCode::ERR_UNKNOWN;
+    }
   }
+
   file_stream.write(reinterpret_cast<const char*>(buffer.data()),
                     buffer.size());
 
@@ -235,3 +265,5 @@ UftpSocketHandle UftpUtils::GetSocketHandle(const std::string& ip_addr,
 
   return sock_handle;
 }
+
+///////////////////////////////////////////////////////////////////////////////

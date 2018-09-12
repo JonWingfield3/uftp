@@ -59,6 +59,7 @@ bool UftpClient::HandleResponse(const UftpMessage& response) {
   } else if (response_code != UftpStatusCode::NO_ERR) {
     std::cout << UftpUtils::StatusCodeToString(response_code) << "\n";
   }
+
   return true;
 }
 

@@ -22,6 +22,7 @@ struct __attribute__((packed)) UftpHeader {
   uint8_t command_length = 0;
   uint8_t argument_length = 0;
   uint8_t crc = 0;
+  uint8_t sequence_num = 0;
   uint32_t message_length = 0;
 };
 

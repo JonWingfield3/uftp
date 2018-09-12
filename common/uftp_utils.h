@@ -42,6 +42,8 @@ class UftpUtils {
   static bool ReceiveMessage(UftpSocketHandle& sock_handle,
                              UftpMessage& message);
 
+  UftpStatusCode ErrnoToStatusCode(int errno_val);
+
  private:
   static uint8_t GetCrc(const UftpMessage& uftp_message);
 
@@ -64,6 +66,7 @@ class UftpUtils {
 
   static const int program_start_time_;
   static const std::map<UftpStatusCode, std::string> UftpStatusCodeStrings;
+  static const std::map<int, UftpStatusCode> ErrnoToStatusCodeMap;
 };
 
 std::ostream& operator<<(std::ostream& ostream, const UftpHeader& uftp_header);

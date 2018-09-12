@@ -14,20 +14,18 @@
 
 /////////////////////////////////////////////////////////////////////////////////
 UftpStatusCode UftpServer::HandleLsRequest(std::vector<uint8_t>& message) {
-  UftpStatusCode return_code = UftpStatusCode::NO_ERR;
+  DIR* dir = opendir(".");
+  if (dir == nullptr) {
+    return UftpStatusCode::ERR_BAD_PERMISSIONS;
+  }
+
   std::ostringstream osstream;
 
-  DIR* dir = nullptr;
-  if ((dir = opendir(".")) != nullptr) {
-    dirent* dir_entry = nullptr;
-    while ((dir_entry = readdir(dir)) != nullptr) {
-      osstream << dir_entry->d_name << "\n";
-    }
-  } else {
-    // Couldn't open dir. Write error mesage
-    osstream << "Couldn't read directory!\n";
-    return_code = UftpStatusCode::ERR_BAD_PERMISSIONS;
+  dirent* dir_entry = nullptr;
+  while ((dir_entry = readdir(dir)) != nullptr) {
+    osstream << dir_entry->d_name << "\n";
   }
+
   const std::string& str = osstream.str();
   message.insert(message.end(), str.begin(), str.end());
 }
