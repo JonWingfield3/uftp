@@ -2,6 +2,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <sys/time.h>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -14,7 +15,7 @@
 #include "uftp_defs.h"
 
 ///////////////////////////////////////////////////////////////////////////////
-const int UftpUtils::program_start_time_ =
+const std::size_t UftpUtils::program_start_time_ =
     std::chrono::time_point_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now())
         .time_since_epoch()
@@ -24,9 +25,7 @@ const std::map<UftpStatusCode, std::string> UftpUtils::UftpStatusCodeStrings{
     {UftpStatusCode::NO_ERR, "No Error"},
     {UftpStatusCode::ERR_FILE_NOT_FOUND, "File Not Found"},
     {UftpStatusCode::ERR_BAD_PERMISSIONS, "Bad Permissions"},
-    {UftpStatusCode::ERR_FILE_ALREADY_EXISTS, "File Already Exists"},
-    {UftpStatusCode::ERR_BAD_COMMAND, "Bad Command"},
-    {UftpStatusCode::ERR_BAD_CRC, "Bad CRC"},
+    {UftpStatusCode::ERR_BAD_COMMAND, "Unknown Command"},
     {UftpStatusCode::ERR_UNKNOWN, "Unknown Error"}};
 
 const std::map<int, UftpStatusCode> UftpUtils::ErrnoToStatusCodeMap{
@@ -54,10 +53,10 @@ std::ostream& operator<<(std::ostream& ostream, const UftpHeader& uftp_header) {
   ostream << "| status_code: "
           << UftpUtils::StatusCodeToString(
                  static_cast<UftpStatusCode>(uftp_header.status_code))
-          << " | command_length: " << +uftp_header.command_length
-          << " | argument_length: " << +uftp_header.argument_length
+          << " | command_length: " << uftp_header.command_length
+          << " | argument_length: " << uftp_header.argument_length
           << " | message_length: " << uftp_header.message_length
-          << " | crc: " << +uftp_header.crc << " | ";
+          << " | sequence number: " << uftp_header.sequence_num << " | ";
   return ostream;
 }
 
@@ -65,7 +64,7 @@ std::ostream& operator<<(std::ostream& ostream, const UftpHeader& uftp_header) {
 std::ostream& operator<<(std::ostream& ostream,
                          const UftpMessage& uftp_message) {
   ostream << "Header: " << uftp_message.header
-          << "Command: " << uftp_message.command
+          << " | Command: " << uftp_message.command
           << " | Argument: " << uftp_message.argument << " | Message: ";
   for (const uint8_t byte : uftp_message.message) {
     ostream << byte;
@@ -95,6 +94,7 @@ int UftpUtils::CheckErr(int ret, const std::string& error_str) {
     std::cerr << error_str << ", errno = " << std::strerror(errno) << std::endl;
     std::exit(errno);
   }
+
   return ret;
 }
 
@@ -105,13 +105,7 @@ UftpStatusCode UftpUtils::ReadFile(const std::string& filename,
 
   if (!file_stream.is_open()) {
     DEBUG_LOG("Couldn't open file:", filename);
-    if (errno == ENOENT) {
-      return UftpStatusCode::ERR_FILE_NOT_FOUND;
-    } else if (errno == EACCES) {
-      return UftpStatusCode::ERR_BAD_PERMISSIONS;
-    } else {
-      return UftpStatusCode::ERR_UNKNOWN;
-    }
+    return ErrnoToStatusCode(errno);
   }
 
   file_stream.seekg(0, std::ios::end);
@@ -149,71 +143,75 @@ UftpStatusCode UftpUtils::WriteFile(const std::string& filename,
 ///////////////////////////////////////////////////////////////////////////////
 void UftpUtils::ConstructUftpHeader(UftpMessage& uftp_message) {
   UftpHeader& header = uftp_message.header;
-  header.crc = 0;
   header.message_length = uftp_message.message.size();
   header.command_length = uftp_message.command.size();
   header.argument_length = uftp_message.argument.size();
-  header.crc = GetCrc(uftp_message);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-uint8_t UftpUtils::GetCrc(const UftpMessage& uftp_message) {
-  const UftpHeader& header = uftp_message.header;
-  uint8_t crc = 0;
-  for (int ii = 0; ii < header.message_length; ++ii) {
-    crc ^= uftp_message.message[ii];
+bool UftpUtils::UdpSendTo(const UftpSocketHandle& sock_handle,
+                          const SendDataBuffer& send_buff) {
+  if (send_buff.buff_len == 0) return true;
+
+  if (sendto(sock_handle.sockfd, send_buff.buff, send_buff.buff_len, 0,
+             (struct sockaddr*)&sock_handle.addr,
+             sizeof(sock_handle.addr)) == -1) {
+    DEBUG_LOG("Time out sending buffer: ", send_buff.buff_name);
+    return false;
   }
-  for (int ii = 0; ii < header.command_length; ++ii) {
-    crc ^= uftp_message.command[ii];
-  }
-  for (int ii = 0; ii < header.argument_length; ++ii) {
-    crc ^= uftp_message.argument[ii];
-  }
-  const uint8_t* header_byte_ptr = reinterpret_cast<const uint8_t*>(&header);
-  for (int ii = 0; ii < sizeof(UftpHeader); ++ii) {
-    crc ^= header_byte_ptr[ii];
-  }
-  return crc;
+
+  DEBUG_LOG("Sent buffer: ", send_buff.buff_name);
+  return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-void UftpUtils::UdpSendTo(const UftpSocketHandle& sock_handle, const void* buff,
-                          int buff_len) {
-  if (buff_len == 0) return;
-
-  sendto(sock_handle.sockfd, buff, buff_len, 0,
-         (struct sockaddr*)&sock_handle.addr, sizeof(sock_handle.addr));
-}
-
-///////////////////////////////////////////////////////////////////////////////
-void UftpUtils::SendMessage(const UftpSocketHandle& sock_handle,
+bool UftpUtils::SendMessage(const UftpSocketHandle& sock_handle,
                             UftpMessage& uftp_message) {
+  static constexpr std::size_t MAX_NUM_RETRY_ATTEMPTS = 3;
+  std::size_t retry_count = 0;
+
   // Fill out header field (command_length, message_lenght)
   ConstructUftpHeader(uftp_message);
 
-  // Send header.
+  DEBUG_LOG("Sending Message:", uftp_message);
+
   const UftpHeader& header = uftp_message.header;
-  UdpSendTo(sock_handle, &header, sizeof(header));
-  DEBUG_LOG("Sent header:", header);
-  // Send command
-  UdpSendTo(sock_handle, uftp_message.command.data(), header.command_length);
-  DEBUG_LOG("Sent command:", uftp_message.command);
-  // Send argument
-  UdpSendTo(sock_handle, uftp_message.argument.data(), header.argument_length);
-  DEBUG_LOG("Sent argument:", uftp_message.argument);
-  // Send message
-  UdpSendTo(sock_handle, uftp_message.message.data(), header.message_length);
-  DEBUG_LOG("Sent message:", uftp_message);
+
+  const std::vector<SendDataBuffer> send_buffers{
+      SendDataBuffer(&header, sizeof(header), "header"),
+      SendDataBuffer(uftp_message.command.data(), header.command_length,
+                     "command"),
+      SendDataBuffer(uftp_message.argument.data(), header.argument_length,
+                     "argument"),
+      SendDataBuffer(uftp_message.message.data(), header.message_length,
+                     "message")};
+
+  for (const SendDataBuffer& send_buff : send_buffers) {
+    retry_count = 0;
+    while (!UdpSendTo(sock_handle, send_buff)) {
+      if (++retry_count >= MAX_NUM_RETRY_ATTEMPTS) {
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-void UftpUtils::UdpRecvFrom(UftpSocketHandle& sock_handle, void* buff,
-                            int buff_len) {
-  if (buff_len == 0) return;
+bool UftpUtils::UdpRecvFrom(UftpSocketHandle& sock_handle,
+                            ReceiveDataBuffer& recv_buff) {
+  if (recv_buff.buff_len == 0) return true;
 
   socklen_t socklen = sizeof(sock_handle.addr);
-  recvfrom(sock_handle.sockfd, buff, buff_len, 0,
-           (struct sockaddr*)&sock_handle.addr, &socklen);
+  if (recvfrom(sock_handle.sockfd, recv_buff.buff, recv_buff.buff_len, 0,
+               (struct sockaddr*)&sock_handle.addr, &socklen) == -1) {
+    DEBUG_LOG("Time out receiving buff: ", recv_buff.buff_name);
+    return false;
+  }
+
+  DEBUG_LOG("Received buff: ", recv_buff.buff_name);
+  return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -221,29 +219,32 @@ bool UftpUtils::ReceiveMessage(UftpSocketHandle& sock_handle,
                                UftpMessage& uftp_message) {
   // Receive header.
   UftpHeader& header = uftp_message.header;
-  UdpRecvFrom(sock_handle, &header, sizeof(header));
-  DEBUG_LOG("Received header:", header);
-  // Receive command.
+  ReceiveDataBuffer header_buff(&header, sizeof(header), "header");
+  if (!UdpRecvFrom(sock_handle, header_buff)) {
+    return false;
+  }
+
+  // Adjust sizes of payload buffers based on header
   uftp_message.command.resize(header.command_length);
-  UdpRecvFrom(sock_handle, (void*)uftp_message.command.data(),
-              header.command_length);
-  DEBUG_LOG("Received command:", uftp_message.command);
-  // Receive argument.
   uftp_message.argument.resize(header.argument_length);
-  UdpRecvFrom(sock_handle, (void*)uftp_message.argument.data(),
-              header.argument_length);
-  DEBUG_LOG("Received argument:", uftp_message.argument);
-  // Receive message.
   uftp_message.message.resize(header.message_length);
-  UdpRecvFrom(sock_handle, uftp_message.message.data(), header.message_length);
-  DEBUG_LOG("Received message:", uftp_message);
 
-  const uint8_t received_crc = header.crc;
-  header.crc = 0;
-  const uint8_t calc_crc = GetCrc(uftp_message);
-  header.crc = received_crc;
+  std::vector<ReceiveDataBuffer> recv_buffers{
+      ReceiveDataBuffer((void*)uftp_message.command.data(),
+                        header.command_length, "command"),
+      ReceiveDataBuffer((void*)uftp_message.argument.data(),
+                        header.argument_length, "argument"),
+      ReceiveDataBuffer(uftp_message.message.data(), header.message_length,
+                        "message")};
 
-  return (calc_crc != received_crc);
+  for (auto& recv_buff : recv_buffers) {
+    if (!UdpRecvFrom(sock_handle, recv_buff)) {
+      return false;
+    }
+  }
+
+  DEBUG_LOG("Received Message:", uftp_message);
+  return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -263,7 +264,13 @@ UftpSocketHandle UftpUtils::GetSocketHandle(const std::string& ip_addr,
     addr.sin_addr.s_addr = inet_addr(ip_addr.c_str());
   }
 
+  // Set send timeout.
+  timeval send_tv;
+  send_tv.tv_sec = 2;
+  send_tv.tv_usec = 0;
+  CheckErr(setsockopt(sock_handle.sockfd, SOL_SOCKET, SO_SNDTIMEO, &send_tv,
+                      sizeof(send_tv)),
+           "Failed to set send timeout");
+
   return sock_handle;
 }
-
-///////////////////////////////////////////////////////////////////////////////

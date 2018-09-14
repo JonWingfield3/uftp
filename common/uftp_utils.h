@@ -37,20 +37,31 @@ class UftpUtils {
   static UftpStatusCode WriteFile(const std::string& filename,
                                   const std::vector<uint8_t>& buffer);
 
-  static void SendMessage(const UftpSocketHandle& sock_handle,
+  static bool SendMessage(const UftpSocketHandle& sock_handle,
                           UftpMessage& uftp_message);
   static bool ReceiveMessage(UftpSocketHandle& sock_handle,
                              UftpMessage& message);
 
-  UftpStatusCode ErrnoToStatusCode(int errno_val);
+  static UftpStatusCode ErrnoToStatusCode(int errno_val);
 
  private:
-  static uint8_t GetCrc(const UftpMessage& uftp_message);
+  template <typename T>
+  struct DataBuffer {
+    DataBuffer() {}
+    DataBuffer(T buff_in, int buff_len_in, const std::string&& buff_name_in)
+        : buff(buff_in), buff_len(buff_len_in), buff_name(buff_name_in) {}
+    T buff = T();
+    int buff_len = 0;
+    const std::string buff_name;
+  };
 
-  static void UdpSendTo(const UftpSocketHandle& sock_handle, const void* buff,
-                        int buff_len);
-  static void UdpRecvFrom(UftpSocketHandle& sock_handle, void* buff,
-                          int buff_len);
+  using SendDataBuffer = DataBuffer<const void*>;
+  using ReceiveDataBuffer = DataBuffer<void*>;
+
+  static bool UdpSendTo(const UftpSocketHandle& sock_handle,
+                        const SendDataBuffer& send_buff);
+  static bool UdpRecvFrom(UftpSocketHandle& sock_handle,
+                          ReceiveDataBuffer& recv_buff);
 
   static void ConstructUftpHeader(UftpMessage& uftp_message);
   static const std::string GetLogPrefix(const std::string& file,
@@ -64,7 +75,7 @@ class UftpUtils {
     _DebugLog(remaining_args...);
   }
 
-  static const int program_start_time_;
+  static const std::size_t program_start_time_;
   static const std::map<UftpStatusCode, std::string> UftpStatusCodeStrings;
   static const std::map<int, UftpStatusCode> ErrnoToStatusCodeMap;
 };

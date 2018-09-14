@@ -13,6 +13,16 @@
 #include <uftp_utils.h>
 
 /////////////////////////////////////////////////////////////////////////////////
+UftpServer::UftpServer() {
+  response_.header.sequence_num = std::numeric_limits<uint32_t>::max();
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+UftpServer::UftpServer(uint16_t port) : server_port_(port) {
+  response_.header.sequence_num = std::numeric_limits<uint32_t>::max();
+}
+
+/////////////////////////////////////////////////////////////////////////////////
 UftpStatusCode UftpServer::HandleLsRequest(std::vector<uint8_t>& message) {
   DIR* dir = opendir(".");
   if (dir == nullptr) {
@@ -28,19 +38,17 @@ UftpStatusCode UftpServer::HandleLsRequest(std::vector<uint8_t>& message) {
 
   const std::string& str = osstream.str();
   message.insert(message.end(), str.begin(), str.end());
+
+  return UftpStatusCode::NO_ERR;
 }
 
 //////////////////////////////////////////////////////////////////////////////
 UftpStatusCode UftpServer::HandleDeleteRequest(const std::string& filename) {
   const int ret = std::remove(filename.c_str());
-  if (ret == 0) {
-    return UftpStatusCode::NO_ERR;
-  } else if (ret == ENOENT) {
-    return UftpStatusCode::ERR_FILE_NOT_FOUND;
-  } else if (ret == EACCES) {
-    return UftpStatusCode::ERR_BAD_PERMISSIONS;
+  if (ret != 0) {
+    return UftpUtils::ErrnoToStatusCode(errno);
   } else {
-    return UftpStatusCode::ERR_UNKNOWN;
+    return UftpStatusCode::NO_ERR;
   }
 }
 
@@ -67,6 +75,7 @@ void UftpServer::Close() {
   if (!open_) {
     return;
   }
+
   UftpUtils::CheckErr(close(sock_handle_.sockfd), "Error closing udp socket");
   DEBUG_LOG("Closed socket on port: ", server_port_);
   open_ = false;
@@ -74,42 +83,52 @@ void UftpServer::Close() {
 
 ///////////////////////////////////////////////////////////////////////////////
 bool UftpServer::ReceiveCommand() {
-  UftpMessage request, response;
+  UftpMessage request;
 
   UftpUtils::ReceiveMessage(sock_handle_, request);
-  HandleRequest(request, response);
-  DEBUG_LOG("Response header:", response.header);
-  UftpUtils::SendMessage(sock_handle_, response);
+  HandleRequest(request);
+  DEBUG_LOG("Response header:", response_.header);
+  if (!UftpUtils::SendMessage(sock_handle_, response_)) {
+    std::cout << "Error sending message";
+    return true;
+  }
 
-  return (response.command != "exit");
+  return (response_.command != "exit");
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-void UftpServer::HandleRequest(const UftpMessage& request,
-                               UftpMessage& response) {
-  // These fields are usually the same in request/response pair.
-  response.command = request.command;
-  response.argument = request.argument;
+void UftpServer::HandleRequest(const UftpMessage& request) {
+  if (request.header.sequence_num == response_.header.sequence_num) {
+    // If the sequence numbers match then this is a re-transmit. Send the last
+    // response.
+    return;
+  }
+
+  // These fields are usually the same in request/response_ pair.
+  response_ = UftpMessage();
+  response_.command = request.command;
+  response_.argument = request.argument;
+  response_.header.sequence_num = request.header.sequence_num;
 
   if (request.command == "exit") {
-    response.header.status_code = UftpStatusCode::NO_ERR;
+    response_.header.status_code = UftpStatusCode::NO_ERR;
 
   } else if (request.command == "ls") {
-    response.header.status_code = HandleLsRequest(response.message);
+    response_.header.status_code = HandleLsRequest(response_.message);
 
   } else if (request.command == "put") {
-    response.header.status_code =
+    response_.header.status_code =
         UftpUtils::WriteFile(request.argument, request.message);
 
   } else if (request.command == "get") {
-    response.header.status_code =
-        UftpUtils::ReadFile(request.argument, response.message);
+    response_.header.status_code =
+        UftpUtils::ReadFile(request.argument, response_.message);
 
   } else if (request.command == "delete") {
-    response.header.status_code = HandleDeleteRequest(request.argument);
+    response_.header.status_code = HandleDeleteRequest(request.argument);
 
   } else {
-    response.header.status_code = UftpStatusCode::ERR_BAD_COMMAND;
+    response_.header.status_code = UftpStatusCode::ERR_BAD_COMMAND;
   }
 }
 

@@ -25,6 +25,15 @@ void UftpClient::Open() {
   sock_handle_ = UftpUtils::GetSocketHandle(server_addr_str_, server_port_);
   DEBUG_LOG("Opened socket to host: ", server_addr_str_, ", port: ",
             server_port_);
+
+  // Set receive timeout
+  timeval receive_tv;
+  receive_tv.tv_sec = 2;
+  receive_tv.tv_usec = 0;
+  UftpUtils::CheckErr(setsockopt(sock_handle_.sockfd, SOL_SOCKET, SO_RCVTIMEO,
+                                 &receive_tv, sizeof(receive_tv)),
+                      "Failed to set receive timeout");
+
   open_ = true;
 }
 
@@ -56,6 +65,10 @@ bool UftpClient::HandleResponse(const UftpMessage& response) {
   } else if (response.command == "get") {
     UftpUtils::WriteFile(response.argument, response.message);
 
+  } else if (response.header.status_code == UftpStatusCode::ERR_BAD_COMMAND) {
+    std::cout << UftpUtils::StatusCodeToString(response_code) << ": '"
+              << response.command << "'\n";
+
   } else if (response_code != UftpStatusCode::NO_ERR) {
     std::cout << UftpUtils::StatusCodeToString(response_code) << "\n";
   }
@@ -74,9 +87,21 @@ bool UftpClient::SendCommand(const std::string& command,
 
   request.command = command;
   request.argument = argument;
+  request.header.sequence_num = current_sequence_num_;
 
-  UftpUtils::SendMessage(sock_handle_, request);
-  UftpUtils::ReceiveMessage(sock_handle_, response);
+  do {
+    // Try sending message. Don't expect errors.
+    if (!UftpUtils::SendMessage(sock_handle_, request)) {
+      std::cout << "Error sending message to: " << server_addr_str_;
+      break;
+    }
+    // Verify that we receive a message in timeout window and that the sequence
+    // numbers match.
+  } while (!UftpUtils::ReceiveMessage(sock_handle_, response) &&
+           response.header.sequence_num == request.header.sequence_num);
+
+  ++current_sequence_num_;
+
   return HandleResponse(response);
 }
 
@@ -103,7 +128,8 @@ static bool ReadCLIInput(std::string& command, std::string& argument) {
     DONE,
   };
 
-  ParserState parser_state;
+  ParserState parser_state = ParserState::LOOKING_FOR_COMMAND;
+
   for (const auto character : user_input) {
     if (parser_state == ParserState::DONE) break;
 
