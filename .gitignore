@@ -5,7 +5,7 @@
 *.o
 *.swp
 *.user
-uftp-server
-uftp-client
+server/uftp_server
+client/uftp_client
 *.png
 *.txt
