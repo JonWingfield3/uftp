@@ -4,7 +4,7 @@ CPPFLAGS = -I../common/
 
 # Run make DEBUG=1 to enable debug build
 DEBUG_FLAG = -D__DEBUG__
-DEBUG ?= 1
+DEBUG ?= 0
 ifeq ($(DEBUG), 1)
   CPPFLAGS += $(DEBUG_FLAG)
 endif

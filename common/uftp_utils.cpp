@@ -35,7 +35,13 @@ const std::map<int, UftpStatusCode> UftpUtils::ErrnoToStatusCodeMap{
 
 ///////////////////////////////////////////////////////////////////////////////
 const std::string& UftpUtils::StatusCodeToString(UftpStatusCode status_code) {
-  return UftpStatusCodeStrings.at(status_code);
+  const auto ite = UftpStatusCodeStrings.find(status_code);
+  if (ite == UftpStatusCodeStrings.end()) {
+    DEBUG_LOG("ERROR! StatusCode:", status_code);
+    return UftpStatusCodeStrings.at(UftpStatusCode::ERR_UNKNOWN);
+  } else {
+    return UftpStatusCodeStrings.at(status_code);
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -103,7 +109,7 @@ UftpStatusCode UftpUtils::ReadFile(const std::string& filename,
                                    std::vector<uint8_t>& buffer) {
   std::ifstream file_stream(filename, std::ios::in | std::ios::binary);
 
-  if (!file_stream.is_open()) {
+  if (!file_stream.good()) {
     DEBUG_LOG("Couldn't open file:", filename);
     return ErrnoToStatusCode(errno);
   }

@@ -136,7 +136,7 @@ void UftpServer::HandleRequest(const UftpMessage& request) {
 int main(int argc, char** argv) {
   if (argc != 2) {
     std::cout
-        << "uftp_server: missing argument\n\tUsage: uftp_server <port_number>";
+        << "uftp_server: missing argument\n\tUsage: uftp_server <port_number>\n";
     std::exit(1);
   }
 

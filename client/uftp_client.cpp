@@ -63,7 +63,11 @@ bool UftpClient::HandleResponse(const UftpMessage& response) {
     }
 
   } else if (response.command == "get") {
-    UftpUtils::WriteFile(response.argument, response.message);
+    if (response.header.status_code == UftpStatusCode::ERR_FILE_NOT_FOUND) {
+      std::cout << "File not found: " << response.argument << "\n";
+    } else {
+      UftpUtils::WriteFile(response.argument, response.message);
+    }
 
   } else if (response.header.status_code == UftpStatusCode::ERR_BAD_COMMAND) {
     std::cout << UftpUtils::StatusCodeToString(response_code) << ": '"
@@ -82,7 +86,11 @@ bool UftpClient::SendCommand(const std::string& command,
   UftpMessage request, response;
 
   if (command == "put") {  // need to check argument and try to read in file.
-    UftpUtils::ReadFile(argument, request.message);
+    const auto status = UftpUtils::ReadFile(argument, request.message);
+    if (status == UftpStatusCode::ERR_FILE_NOT_FOUND) {
+      std::cout << "Unknown file: " << argument << "\n";
+      return true;
+    }
   }
 
   request.command = command;
