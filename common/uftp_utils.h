@@ -37,7 +37,7 @@ class UftpUtils {
   static UftpStatusCode WriteFile(const std::string& filename,
                                   const std::vector<uint8_t>& buffer);
 
-  static bool SendMessage(const UftpSocketHandle& sock_handle,
+  static bool SendMessage(UftpSocketHandle& sock_handle,
                           UftpMessage& uftp_message);
   static bool ReceiveMessage(UftpSocketHandle& sock_handle,
                              UftpMessage& message);
@@ -48,17 +48,18 @@ class UftpUtils {
   template <typename T>
   struct DataBuffer {
     DataBuffer() {}
-    DataBuffer(T buff_in, int buff_len_in, const std::string&& buff_name_in)
+    DataBuffer(T buff_in, uint64_t buff_len_in,
+               const std::string&& buff_name_in)
         : buff(buff_in), buff_len(buff_len_in), buff_name(buff_name_in) {}
     T buff = T();
-    int buff_len = 0;
+    uint64_t buff_len = 0;
     const std::string buff_name;
   };
 
   using SendDataBuffer = DataBuffer<const void*>;
   using ReceiveDataBuffer = DataBuffer<void*>;
 
-  static bool UdpSendTo(const UftpSocketHandle& sock_handle,
+  static bool UdpSendTo(UftpSocketHandle& sock_handle,
                         const SendDataBuffer& send_buff);
   static bool UdpRecvFrom(UftpSocketHandle& sock_handle,
                           ReceiveDataBuffer& recv_buff);

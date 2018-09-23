@@ -15,6 +15,10 @@ enum UftpStatusCode {
 };
 
 #define UftpSyncWord (0x55555555)
+#define UftpMTU (65000)
+#define UftpAck ('!')
+
+using UftpAckType = uint8_t;
 
 ///////////////////////////////////////////////////////////////////////////////
 struct __attribute__((packed)) UftpHeader {
@@ -22,7 +26,7 @@ struct __attribute__((packed)) UftpHeader {
   uint32_t status_code = NO_ERR;
   uint16_t command_length = 0;
   uint16_t argument_length = 0;
-  uint32_t message_length = 0;
+  uint64_t message_length = 0;
   uint32_t sequence_num = 0;
 };
 
