@@ -64,6 +64,9 @@ class UftpUtils {
   static bool UdpRecvFrom(UftpSocketHandle& sock_handle,
                           ReceiveDataBuffer& recv_buff);
 
+  static bool SendAck(UftpSocketHandle& sock_handle);
+  static bool RecvAck(UftpSocketHandle& sock_handle);
+
   static void ConstructUftpHeader(UftpMessage& uftp_message);
   static const std::string GetLogPrefix(const std::string& file,
                                         const std::string& func, int line);
