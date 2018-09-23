@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <chrono>
 #include <cstdio>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -85,10 +86,13 @@ void UftpServer::Close() {
 bool UftpServer::ReceiveCommand() {
   UftpMessage request;
 
-  UftpUtils::ReceiveMessage(sock_handle_, request);
+  while (!UftpUtils::ReceiveMessage(sock_handle_, request)) {
+    std::cout << "Error receiving message" << std::endl;
+  }
+
+  std::cout << "Received message" << std::endl;
   HandleRequest(request);
-  DEBUG_LOG("Response header:", response_.header);
-  if (!UftpUtils::SendMessage(sock_handle_, response_)) {
+  while (!UftpUtils::SendMessage(sock_handle_, response_)) {
     std::cout << "Error sending message";
     return true;
   }
@@ -101,6 +105,7 @@ void UftpServer::HandleRequest(const UftpMessage& request) {
   if (request.header.sequence_num == response_.header.sequence_num) {
     // If the sequence numbers match then this is a re-transmit. Send the last
     // response.
+    DEBUG_LOG("Sequence numbers match!", request.header.sequence_num);
     return;
   }
 
@@ -135,8 +140,8 @@ void UftpServer::HandleRequest(const UftpMessage& request) {
 ///////////////////////////////////////////////////////////////////////////////
 int main(int argc, char** argv) {
   if (argc != 2) {
-    std::cout
-        << "uftp_server: missing argument\n\tUsage: uftp_server <port_number>\n";
+    std::cout << "uftp_server: missing argument\n\tUsage: uftp_server "
+                 "<port_number>\n";
     std::exit(1);
   }
 
@@ -146,7 +151,7 @@ int main(int argc, char** argv) {
   uftp_server.Open();
 
   while (uftp_server.ReceiveCommand()) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    //    std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
   uftp_server.Close();

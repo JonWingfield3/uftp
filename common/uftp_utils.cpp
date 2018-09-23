@@ -159,15 +159,24 @@ bool UftpUtils::UdpSendTo(const UftpSocketHandle& sock_handle,
                           const SendDataBuffer& send_buff) {
   if (send_buff.buff_len == 0) return true;
 
-  if (sendto(sock_handle.sockfd, send_buff.buff, send_buff.buff_len, 0,
-             (struct sockaddr*)&sock_handle.addr,
-             sizeof(sock_handle.addr)) == -1) {
+  int bytes_sent = 0;
+  if ((bytes_sent =
+           sendto(sock_handle.sockfd, send_buff.buff, send_buff.buff_len, 0,
+                  (struct sockaddr*)&sock_handle.addr,
+                  sizeof(sock_handle.addr))) == -1) {
     DEBUG_LOG("Time out sending buffer: ", send_buff.buff_name);
     return false;
   }
 
-  DEBUG_LOG("Sent buffer: ", send_buff.buff_name);
-  return true;
+  const bool sent_expected_num_bytes = (bytes_sent == send_buff.buff_len);
+  if (sent_expected_num_bytes) {
+    DEBUG_LOG("Sent buff: ", send_buff.buff_name);
+  } else {
+    DEBUG_LOG("Couldn't send all of buff: ", send_buff.buff_name, ", sent: ",
+              bytes_sent, ", wanted to send: ", send_buff.buff_len);
+  }
+
+  return sent_expected_num_bytes;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -176,10 +185,7 @@ bool UftpUtils::SendMessage(const UftpSocketHandle& sock_handle,
   static constexpr std::size_t MAX_NUM_RETRY_ATTEMPTS = 3;
   std::size_t retry_count = 0;
 
-  // Fill out header field (command_length, message_lenght)
   ConstructUftpHeader(uftp_message);
-
-  DEBUG_LOG("Sending Message:", uftp_message);
 
   const UftpHeader& header = uftp_message.header;
 
@@ -210,14 +216,29 @@ bool UftpUtils::UdpRecvFrom(UftpSocketHandle& sock_handle,
   if (recv_buff.buff_len == 0) return true;
 
   socklen_t socklen = sizeof(sock_handle.addr);
-  if (recvfrom(sock_handle.sockfd, recv_buff.buff, recv_buff.buff_len, 0,
-               (struct sockaddr*)&sock_handle.addr, &socklen) == -1) {
+  int bytes_read = 0;
+  if ((bytes_read =
+           recvfrom(sock_handle.sockfd, recv_buff.buff, recv_buff.buff_len, 0,
+                    (struct sockaddr*)&sock_handle.addr, &socklen)) == -1) {
     DEBUG_LOG("Time out receiving buff: ", recv_buff.buff_name);
     return false;
   }
 
-  DEBUG_LOG("Received buff: ", recv_buff.buff_name);
-  return true;
+  const bool read_expected_num_bytes = (bytes_read == recv_buff.buff_len);
+  if (read_expected_num_bytes) {
+    DEBUG_LOG("Received buff: ", recv_buff.buff_name);
+  } else {
+    DEBUG_LOG("Couldn't receive all of buff: ", recv_buff.buff_name,
+              ", received: ", bytes_read, ", wanted to receive: ",
+              recv_buff.buff_len);
+    std::ostringstream bytes_received_str;
+    for (int ii = 0; ii < bytes_read; ++ii) {
+      bytes_received_str << (int)((char*)recv_buff.buff)[ii] << ", ";
+    }
+    DEBUG_LOG("Bytes received: ", bytes_received_str.str());
+  }
+
+  return read_expected_num_bytes;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -225,10 +246,12 @@ bool UftpUtils::ReceiveMessage(UftpSocketHandle& sock_handle,
                                UftpMessage& uftp_message) {
   // Receive header.
   UftpHeader& header = uftp_message.header;
+  header.sync = 0;
   ReceiveDataBuffer header_buff(&header, sizeof(header), "header");
-  if (!UdpRecvFrom(sock_handle, header_buff)) {
+  if (!UdpRecvFrom(sock_handle, header_buff) || header.sync != UftpSyncWord) {
     return false;
   }
+  DEBUG_LOG("Received header: ", header);
 
   // Adjust sizes of payload buffers based on header
   uftp_message.command.resize(header.command_length);
@@ -249,7 +272,6 @@ bool UftpUtils::ReceiveMessage(UftpSocketHandle& sock_handle,
     }
   }
 
-  DEBUG_LOG("Received Message:", uftp_message);
   return true;
 }
 
@@ -272,7 +294,7 @@ UftpSocketHandle UftpUtils::GetSocketHandle(const std::string& ip_addr,
 
   // Set send timeout.
   timeval send_tv;
-  send_tv.tv_sec = 2;
+  send_tv.tv_sec = 5;
   send_tv.tv_usec = 0;
   CheckErr(setsockopt(sock_handle.sockfd, SOL_SOCKET, SO_SNDTIMEO, &send_tv,
                       sizeof(send_tv)),

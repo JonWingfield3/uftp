@@ -14,8 +14,11 @@ enum UftpStatusCode {
   ERR_UNKNOWN,
 };
 
+#define UftpSyncWord (0x55555555)
+
 ///////////////////////////////////////////////////////////////////////////////
 struct __attribute__((packed)) UftpHeader {
+  uint32_t sync = UftpSyncWord;
   uint32_t status_code = NO_ERR;
   uint16_t command_length = 0;
   uint16_t argument_length = 0;
@@ -29,7 +32,7 @@ struct UftpMessage {
   UftpMessage(std::string command_in, std::vector<uint8_t> message_in)
       : command(command_in), message(message_in) {}
 
-  UftpHeader header;
+  UftpHeader header = UftpHeader();
   std::string command;
   std::string argument;
   std::vector<uint8_t> message;

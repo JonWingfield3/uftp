@@ -70,8 +70,7 @@ bool UftpClient::HandleResponse(const UftpMessage& response) {
     }
 
   } else if (response.header.status_code == UftpStatusCode::ERR_BAD_COMMAND) {
-    std::cout << UftpUtils::StatusCodeToString(response_code) << ": '"
-              << response.command << "'\n";
+    std::cout << UftpUtils::StatusCodeToString(response_code) << "\n";
 
   } else if (response_code != UftpStatusCode::NO_ERR) {
     std::cout << UftpUtils::StatusCodeToString(response_code) << "\n";
@@ -93,20 +92,32 @@ bool UftpClient::SendCommand(const std::string& command,
     }
   }
 
+  request.header.status_code = UftpStatusCode::NO_ERR;
   request.command = command;
   request.argument = argument;
   request.header.sequence_num = current_sequence_num_;
+  bool response_received = false;
+  bool matching_seq_nums = false;
 
   do {
     // Try sending message. Don't expect errors.
     if (!UftpUtils::SendMessage(sock_handle_, request)) {
       std::cout << "Error sending message to: " << server_addr_str_;
-      break;
+      continue;
     }
-    // Verify that we receive a message in timeout window and that the sequence
-    // numbers match.
-  } while (!UftpUtils::ReceiveMessage(sock_handle_, response) &&
-           response.header.sequence_num == request.header.sequence_num);
+
+    response_received = UftpUtils::ReceiveMessage(sock_handle_, response);
+    if (!response_received) {
+      DEBUG_LOG("No Response Received!");
+    }
+
+    matching_seq_nums =
+        response.header.sequence_num == request.header.sequence_num;
+    if (!matching_seq_nums) {
+      DEBUG_LOG("Mismatched Sequence numbers.");
+    }
+
+  } while (!response_received || !matching_seq_nums);
 
   ++current_sequence_num_;
 
@@ -126,7 +137,6 @@ static bool ReadCLIInput(std::string& command, std::string& argument) {
   std::string user_input;
   // Read next line of user input.
   std::getline(std::cin, user_input);
-  DEBUG_LOG("Received user_input:", user_input);
 
   enum class ParserState {
     LOOKING_FOR_COMMAND,
